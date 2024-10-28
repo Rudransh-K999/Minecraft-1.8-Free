@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebRTC Video Chat</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.js"></script>
+  <style>
+    #localVideo, #remoteVideo {
+      width: 100%;
+      max-width: 400px;
+      height: auto;
+    }
+  .dark-mode {
+      background-color: #333;
+      color: #fff;
+    }
+  .volume-meter {
+      width: 100%;
+      height: 10px;
+      background-color: #ccc;
+      border-radius: 5px;
+      margin-top: 10px;
+    }
+  .volume-meter.level {
+      width: 0;
+      height: 100%;
+      background-color: #4CAF50;
+      border-radius: 5px;
+    }
+  .device-info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="dark-mode">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+    <button id="toggleCamera">Toggle Camera</button>
+    <button id="toggleMicrophone">Toggle Microphone</button>
+    <div class="volume-meter">
+      <div class="level" id="volumeLevel"></div>
+    </div>
+    <div class="device-info">
+      <span id="deviceBattery"></span>
+      <span id="signalStrength"></span>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const toggleCameraButton = document.getElementById('toggleCamera');
+    const toggleMicrophoneButton = document.getElementById('toggleMicrophone');
+    const volumeMeter = document.getElementById('volumeMeter');
+    const volumeLevel = document.getElementById('volumeLevel');
+    const deviceBattery = document.getElementById('deviceBattery');
+    const signalStrength = document.getElementById('signalStrength');
+
+    let localStream = null;
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(stream => {
+        localStream = stream;
+        localVideo.srcObject = stream;
+        socket.emit('ready');
+
+        // Update volume meter
+        localStream.getAudioTracks()[0].addEventListener('volumechange', () => {
+          const volume = localStream.getAudioTracks()[0].volume;
+          volumeLevel.style.width = `${volume * 100}%`;
+        });
+      })
+    .catch(error => {
+        console.error('Error accessing media devices:', error);
+      });
+
+    toggleCameraButton.addEventListener('click', () => {
+      if (localStream.getVideoTracks()[0].enabled) {
+        localStream.getVideoTracks()[0].enabled = false;
+        toggleCameraButton.textContent = 'Turn Camera On';
+      } else {
+        localStream.getVideoTracks()[0].enabled = true;
+        toggleCameraButton.textContent = 'Turn Camera Off';
+      }
+    });
+
+    toggleMicrophoneButton.addEventListener('click', () => {
+      if (localStream.getAudioTracks()[0].enabled) {
+        localStream.getAudioTracks()[0].enabled = false;
+        toggleMicrophoneButton.textContent = 'Turn Microphone On';
+      } else {
+        localStream.getAudioTracks()[0].enabled = true;
+        toggleMicrophoneButton.textContent = 'Turn Microphone Off';
+      }
+    });
+
+    socket.on('offer', (id, description) => {
+      peerConnection.setRemoteDescription(description);
+      peerConnection.createAnswer()
+      .then(sdp => peerConnection.setLocalDescription(sdp))
+      .then(() => {
+          socket.emit('answer', id, peerConnection.localDescription);
+        });
+    });
+
+    socket.on('candidate', (id, candidate) => {
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    socket.on('connect', () => {
+      peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      peerConnection.onicecandidate = event => {
+        if (event.candidate) {
+          socket.emit('candidate', socket.id, event.candidate);
+        }
+      };
+
+      peerConnection.ontrack = event => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+    });
+
+    socket.on('disconnect', () => {
+      peerConnection.close();
+    });
+
+    // Get device battery level
+    navigator.getBattery().then(battery => {
+      deviceBattery.textContent = `Battery: ${battery.level * 100}%`;
+    });
+
+    // Get signal strength
+    navigator.connection.addEventListener('change', () => {
+      signalStrength.textContent = `Signal Strength: ${navigator.connection.effectiveType}`;
+    });
+  </script>
+</body>
+</html>
